@@ -5,75 +5,95 @@
 
 const API_TIMEOUT = 180000; // 180 seconds
 
+import {
+  EMOTIONS,
+  TIME_SINCE,
+  TIME_AVAILABLE,
+  NETWORKING_COMFORT,
+  JOB_SEARCH_STATUS,
+} from '../constants/config.js';
+
+// Turns an option id (e.g. 'recently') into its human label for Claude
+const labelFor = (list, id) => list.find((o) => o.id === id)?.label || id || '';
+
 /**
- * Builds the intake payload in the format expected by n8n
+ * Builds the intake payload in the format expected by n8n WF1
+ * (flat snake_case fields, human-readable labels)
  */
 export function buildIntakePayload(intakeData) {
+  const { transition, professional, nextStep, energy, goal } = intakeData;
   return {
-    transition: {
-      reason: intakeData.transition.reason,
-      timeSince: intakeData.transition.timeSince,
-      feeling: intakeData.transition.feeling,
-    },
-    professional: {
-      background: intakeData.professional.background,
-      industries: intakeData.professional.industries,
-      level: intakeData.professional.level,
-    },
-    nextStep: {
-      openTo: intakeData.nextStep.openTo,
-      priorities: intakeData.nextStep.priorities,
-      avoid: intakeData.nextStep.avoid,
-    },
-    energy: {
-      availableTime: intakeData.energy.availableTime,
-      networkingComfort: intakeData.energy.networkingComfort,
-      focus: intakeData.energy.focus,
-    },
-    goal: {
-      ninetyDayWin: intakeData.goal.ninetyDayWin,
-      additionalContext: intakeData.goal.additionalContext,
-    },
-    timestamp: new Date().toISOString(),
+    transition_types: transition.reason,
+    time_since: labelFor(TIME_SINCE, transition.timeSince),
+    feeling: labelFor(EMOTIONS, transition.feeling),
+    background: professional.background,
+    industries: professional.industries,
+    level: professional.level,
+    open_to: nextStep.openTo,
+    priorities: nextStep.priorities,
+    dealbreakers: nextStep.avoid || '',
+    bandwidth: labelFor(TIME_AVAILABLE, energy.availableTime),
+    networking_comfort: labelFor(NETWORKING_COMFORT, energy.networkingComfort),
+    mode: labelFor(JOB_SEARCH_STATUS, energy.focus),
+    win_90: goal.ninetyDayWin,
+    anything_else: goal.additionalContext || '',
   };
 }
 
 /**
- * Normalizes n8n webhook response into the application's internal plan model
+ * Normalizes the n8n WF1 response into the app's internal plan model.
+ * n8n returns: { session_id, headline, preview: [{title, why}], plan: {...} }
  */
 export function normalizePlanResponse(response) {
   if (!response) {
     throw new Error('Invalid response from plan generator');
   }
+  const data = typeof response === 'string' ? JSON.parse(response) : response;
 
-  // Handle different possible response structures from n8n
-  const planData = typeof response === 'string' ? JSON.parse(response) : response;
+  if (data.session_id) {
+    localStorage.setItem('meridian_session_id', data.session_id);
+  }
+
+  const plan = data.plan || {};
+  const phase = (n) => (plan.phases || []).find((p) => Number(p.phase) === n) || {};
+  const items = (p) =>
+    (p.actions || []).map((a) => ({
+      title: a.title,
+      description: a.detail,
+      successSignal: a.success_signal,
+    }));
+  const p30 = phase(30);
+  const p60 = phase(60);
+  const p90 = phase(90);
 
   return {
+    sessionId: data.session_id,
+    headline: data.headline,
     preview: {
-      title: planData.preview?.title || 'Here\'s a glimpse of your first 30 days...',
-      message: planData.preview?.message || 'Your full 90-day plan is ready — including actionable steps, goals, and checkpoints.',
-      actions: Array.isArray(planData.preview?.actions) ? planData.preview.actions : [],
+      title: data.headline || "Here's a glimpse of your first 30 days...",
+      message: 'Your full 90-day plan is ready — including actionable steps, goals, and checkpoints.',
+      actions: (data.preview || []).map((a) => ({ title: a.title, description: a.why })),
     },
     thirtyDays: {
-      title: planData.thirtyDays?.title || 'Days 1–30: Stabilize & Clarify',
-      description: planData.thirtyDays?.description || 'Stabilize, reflect, clarify, and establish momentum.',
-      items: Array.isArray(planData.thirtyDays?.items) ? planData.thirtyDays.items : [],
+      title: p30.theme ? `Days 1–30: ${p30.theme}` : 'Days 1–30: Stabilize & Clarify',
+      description: (p30.quick || []).join(' · '),
+      items: items(p30),
     },
     sixtyDays: {
-      title: planData.sixtyDays?.title || 'Days 31–60: Build & Connect',
-      description: planData.sixtyDays?.description || 'Build visibility, relationships, skills, applications, opportunities, or experiments.',
-      items: Array.isArray(planData.sixtyDays?.items) ? planData.sixtyDays.items : [],
+      title: p60.theme ? `Days 31–60: ${p60.theme}` : 'Days 31–60: Build & Connect',
+      description: (p60.quick || []).join(' · '),
+      items: items(p60),
     },
     ninetyDays: {
-      title: planData.ninetyDays?.title || 'Days 61–90: Accelerate & Decide',
-      description: planData.ninetyDays?.description || 'Accelerate execution, evaluate results, strengthen positioning, and decide next moves.',
-      items: Array.isArray(planData.ninetyDays?.items) ? planData.ninetyDays.items : [],
+      title: p90.theme ? `Days 61–90: ${p90.theme}` : 'Days 61–90: Accelerate & Decide',
+      description: (p90.quick || []).join(' · '),
+      items: items(p90),
     },
-    dailyCheckins: {
-      affirmations: Array.isArray(planData.dailyCheckins?.affirmations) ? planData.dailyCheckins.affirmations : [],
-      focusAreas: Array.isArray(planData.dailyCheckins?.focusAreas) ? planData.dailyCheckins.focusAreas : [],
-    },
+    winCheck: plan.win_check,
+    networkingAdvice: plan.networking_advice,
+    recruiterGuidance: plan.recruiter_guidance,
+    warnings: plan.warnings || [],
+    dailyCheckins: { affirmations: [], focusAreas: [] },
   };
 }
 
