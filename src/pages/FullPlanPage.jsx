@@ -103,9 +103,9 @@ function ProUpgradeCard() {
 }
 
 export function FullPlanPage() {
-  const { state } = useOnboarding();
+  const { state, setStage } = useOnboarding();
   const plan = state.plan || {};
-  const email = state.email || 'your email';
+  const email = state.email;
 
   const thirtyDays = plan.thirtyDays || {};
   const sixtyDays = plan.sixtyDays || {};
@@ -129,9 +129,16 @@ export function FullPlanPage() {
       <div className="px-6 py-8 max-w-3xl mx-auto">
         {/* Confirmation banner */}
         <div className="bg-meridian-cream rounded-xl p-4 mb-8">
-          <p className="text-sm text-gray-700">
-            ✨ Your plan is on its way to <strong>{email}</strong>
-          </p>
+          {state.emailed && email ? (
+            <p className="text-sm text-gray-700">
+              Check your inbox ✨ Your plan is on its way to <strong>{email}</strong>. (Peek in
+              Promotions if you don't see it.)
+            </p>
+          ) : (
+            <p className="text-sm text-gray-700">
+              ✨ Your plan is saved on this device. Start your first check-in whenever you're ready.
+            </p>
+          )}
         </div>
 
         {/* 30-day phase */}
@@ -180,7 +187,11 @@ export function FullPlanPage() {
           <p className="text-gray-600 mb-6">
             Ready to get started? Check in each day for personalized guidance.
           </p>
-          <Button variant="primary" size="lg">
+          <Button
+            variant="primary"
+            size="lg"
+            onClick={() => setStage(ONBOARDING_STAGES.DAILY_CHECKIN)}
+          >
             Start my first check-in →
           </Button>
         </div>

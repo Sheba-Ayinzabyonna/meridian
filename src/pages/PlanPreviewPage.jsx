@@ -1,47 +1,97 @@
 /**
  * Plan Preview Page (Aha Moment)
- * Shows personalized 30-day preview and email capture
+ * Shows personalized 30-day preview and email capture.
+ *
+ * "Send my full plan" posts { session_id, email } to WF2 (/email-gate) via
+ * VITE_MERIDIAN_EMAIL_WEBHOOK_URL. Whatever happens with the email, the user
+ * always gets to see the full plan on screen.
  */
 
 import { useState } from 'react';
 import { useOnboarding } from '../context/OnboardingContext';
-import { ONBOARDING_STAGES } from '../constants/config';
+import { ONBOARDING_STAGES, STORAGE_KEYS } from '../constants/config';
 import { validateEmail } from '../services/meridianApi';
 import { Button, Card, TextInput } from '../components';
 
+const EMAIL_WEBHOOK_URL = import.meta.env.VITE_MERIDIAN_EMAIL_WEBHOOK_URL;
+
+function getSessionId(state) {
+  return state.plan?.sessionId || localStorage.getItem(STORAGE_KEYS.SESSION_ID) || null;
+}
+
 export function PlanPreviewPage() {
-  const { state, setStage, setEmail } = useOnboarding();
-  const [emailInput, setEmailInput] = useState(state.email);
+  const { state, setStage, setEmail, setEmailed } = useOnboarding();
+  const [emailInput, setEmailInput] = useState(state.email || '');
   const [emailError, setEmailError] = useState(null);
+  const [notice, setNotice] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const plan = state.plan;
   const preview = plan?.preview || {};
   const actions = preview.actions || [];
 
-  const handleEmailSubmit = () => {
-    setEmailError(null);
+  const showFullPlan = (emailValue, emailed) => {
+    if (emailValue) setEmail(emailValue);
+    setEmailed(emailed);
+    setStage(ONBOARDING_STAGES.FULL_PLAN);
+  };
 
-    if (!emailInput.trim()) {
+  const handleEmailSubmit = async () => {
+    setEmailError(null);
+    setNotice(null);
+
+    const email = emailInput.trim();
+
+    if (!email) {
       setEmailError('Please enter your email address');
       return;
     }
+    if (!validateEmail(email)) {
+      setEmailError("Hmm, that email doesn't look right. Mind checking it?");
+      return;
+    }
 
-    if (!validateEmail(emailInput)) {
-      setEmailError('Please enter a valid email address');
+    const sessionId = getSessionId(state);
+
+    // No webhook configured (e.g. Render env var missing): still show the plan.
+    if (!EMAIL_WEBHOOK_URL) {
+      console.warn('VITE_MERIDIAN_EMAIL_WEBHOOK_URL not configured; skipping email send.');
+      showFullPlan(email, false);
       return;
     }
 
     setIsSubmitting(true);
-    // In a real scenario, you'd send this to a backend
-    setTimeout(() => {
-      setEmail(emailInput);
-      setStage(ONBOARDING_STAGES.FULL_PLAN);
-    }, 500);
+    try {
+      const res = await fetch(EMAIL_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId, email }),
+      });
+      const data = await res.json().catch(() => ({ ok: false }));
+
+      if (data.ok) {
+        showFullPlan(email, true);
+      } else if (data.error === 'invalid_email') {
+        setEmailError("Hmm, that email doesn't look right. Mind checking it?");
+        setIsSubmitting(false);
+      } else if (data.error === 'session_not_found') {
+        // Rare: the saved plan expired on the server. Show the plan locally.
+        setNotice("We couldn't find your saved plan, but here it is on screen.");
+        showFullPlan(email, false);
+      } else {
+        setNotice("We couldn't send the email just now — but your plan is right here.");
+        showFullPlan(email, false);
+      }
+    } catch (err) {
+      console.error('Email send failed:', err);
+      setNotice("We couldn't send the email just now — but your plan is right here.");
+      showFullPlan(email, false);
+    }
   };
 
   const handleSkip = () => {
-    setEmail(emailInput || 'anonymous@meridian.local');
+    // "Maybe later" never calls the backend; it just shows the stored plan.
+    setEmailed(false);
     setStage(ONBOARDING_STAGES.FULL_PLAN);
   };
 
@@ -89,6 +139,9 @@ export function PlanPreviewPage() {
             <p className="text-gray-700 text-sm">
               Including daily check-ins, milestones, and personalized guidance.
             </p>
+            <p className="text-meridian-gold font-semibold text-sm mt-3">
+              Free. No credit card, no payment, just your email.
+            </p>
           </div>
         </div>
       </div>
@@ -115,8 +168,14 @@ export function PlanPreviewPage() {
 
           {/* Privacy note */}
           <p className="text-xs text-gray-500 mt-4 mb-6">
-            We respect your privacy. Your email will only be used to send your plan and optional updates.
+            No credit card required. Ever. We only use your email to send your plan.
           </p>
+
+          {notice && (
+            <p className="text-xs text-meridian-teal bg-meridian-cream rounded-lg px-3 py-2 mb-6">
+              {notice}
+            </p>
+          )}
 
           {/* Actions */}
           <div className="space-y-3">

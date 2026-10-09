@@ -33,10 +33,30 @@ const initialState = {
   },
   plan: null,
   email: '',
+  emailed: false,
   apiStatus: 'idle', // idle, loading, success, error
   apiError: null,
   sessionId: null,
 };
+
+// Restore a previous session from localStorage so a refresh doesn't lose the plan.
+function loadInitialState() {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEYS.INTAKE_DATA);
+    if (!stored) return initialState;
+    const parsed = JSON.parse(stored);
+    const restored = { ...initialState, ...parsed };
+    // Never resume on the loading screen: if the plan already exists, show it.
+    if (restored.currentStage === ONBOARDING_STAGES.BUILDING_PLAN) {
+      restored.currentStage = restored.plan
+        ? ONBOARDING_STAGES.PLAN_PREVIEW
+        : ONBOARDING_STAGES.WELCOME;
+    }
+    return restored;
+  } catch (err) {
+    return initialState;
+  }
+}
 
 function onboardingReducer(state, action) {
   switch (action.type) {
@@ -118,6 +138,9 @@ function onboardingReducer(state, action) {
     case 'SET_EMAIL':
       return { ...state, email: action.payload };
 
+    case 'SET_EMAILED':
+      return { ...state, emailed: action.payload };
+
     case 'SET_API_STATUS':
       return {
         ...state,
@@ -140,34 +163,27 @@ function onboardingReducer(state, action) {
 }
 
 export function OnboardingProvider({ children }) {
-  const [state, dispatch] = useReducer(onboardingReducer, initialState);
+  // Initialise straight from localStorage, so a refresh restores the plan
+  // instead of dropping back to a blank welcome screen.
+  const [state, dispatch] = useReducer(onboardingReducer, initialState, loadInitialState);
 
-  // Persist state to localStorage
+  // Persist state to localStorage on every change.
   useEffect(() => {
-    const dataToStore = {
-      intake: state.intake,
-      currentStage: state.currentStage,
-      email: state.email,
-      plan: state.plan,
-      sessionId: state.sessionId,
-    };
-    sessionStorage.setItem(STORAGE_KEYS.INTAKE_DATA, JSON.stringify(dataToStore));
-  }, [state.intake, state.currentStage, state.email, state.plan, state.sessionId]);
-
-  // Restore state from sessionStorage on mount
-  useEffect(() => {
-    const stored = sessionStorage.getItem(STORAGE_KEYS.INTAKE_DATA);
-    if (stored) {
-      const restoredData = JSON.parse(stored);
-      dispatch({
-        type: 'RESTORE_STATE',
-        payload: {
-          ...state,
-          ...restoredData,
-        },
-      });
+    try {
+      const dataToStore = {
+        intake: state.intake,
+        currentStage: state.currentStage,
+        email: state.email,
+        emailed: state.emailed,
+        plan: state.plan,
+        sessionId: state.sessionId,
+      };
+      localStorage.setItem(STORAGE_KEYS.INTAKE_DATA, JSON.stringify(dataToStore));
+    } catch (err) {
+      // Storage can be blocked (private mode) or full; the app still works.
+      console.warn('Could not persist session:', err);
     }
-  }, []);
+  }, [state.intake, state.currentStage, state.email, state.emailed, state.plan, state.sessionId]);
 
   const setStage = useCallback((stage) => {
     dispatch({ type: 'SET_STAGE', payload: stage });
@@ -201,6 +217,10 @@ export function OnboardingProvider({ children }) {
     dispatch({ type: 'SET_EMAIL', payload: email });
   }, []);
 
+  const setEmailed = useCallback((emailed) => {
+    dispatch({ type: 'SET_EMAILED', payload: emailed });
+  }, []);
+
   const setApiStatus = useCallback((status) => {
     dispatch({ type: 'SET_API_STATUS', payload: status });
   }, []);
@@ -211,7 +231,12 @@ export function OnboardingProvider({ children }) {
 
   const resetOnboarding = useCallback(() => {
     dispatch({ type: 'RESET_ONBOARDING' });
-    sessionStorage.removeItem(STORAGE_KEYS.INTAKE_DATA);
+    try {
+      localStorage.removeItem(STORAGE_KEYS.INTAKE_DATA);
+      localStorage.removeItem(STORAGE_KEYS.SESSION_ID);
+    } catch (err) {
+      console.warn('Could not clear session:', err);
+    }
   }, []);
 
   const value = {
@@ -224,6 +249,7 @@ export function OnboardingProvider({ children }) {
     updateGoal,
     setPlan,
     setEmail,
+    setEmailed,
     setApiStatus,
     setApiError,
     resetOnboarding,
