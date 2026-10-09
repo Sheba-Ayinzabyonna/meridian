@@ -34,6 +34,9 @@ export function CompassRose({ className = '', animated = false }) {
 
         {/* South point */}
         <polygon points="50,92 45,80 50,82 55,80" />
+        <text x="50" y="99" textAnchor="middle" fontSize="8" fontWeight="bold" fill="#C9A84C">
+          S
+        </text>
 
         {/* East point */}
         <polygon points="92,50 80,45 82,50 80,55" />
