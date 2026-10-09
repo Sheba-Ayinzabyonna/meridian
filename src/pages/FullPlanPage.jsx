@@ -3,8 +3,9 @@
  * Displays complete 30/60/90 day roadmap and Pro upgrade
  */
 
+import { useState } from 'react';
 import { useOnboarding } from '../context/OnboardingContext';
-import { ONBOARDING_STAGES } from '../constants/config';
+import { ONBOARDING_STAGES, STORAGE_KEYS } from '../constants/config';
 import { Button, Card } from '../components';
 
 const PRO_FEATURES = [
@@ -16,20 +17,73 @@ const PRO_FEATURES = [
   { title: 'Priority Support', icon: '💬' },
 ];
 
+// True when the stored check-in history already has today's date.
+function isCheckedInToday() {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEYS.CHECKIN);
+    if (!stored) return false;
+    const { history = [] } = JSON.parse(stored);
+    const last = history[history.length - 1];
+    return Boolean(last && last.date === new Date().toISOString().slice(0, 10));
+  } catch (err) {
+    return false;
+  }
+}
+
 function PlanPhase({ title, description, items = [] }) {
+  const [open, setOpen] = useState(false);
+  const hasItems = items.length > 0;
+  const toggle = () => hasItems && setOpen((o) => !o);
+
   return (
     <Card className="p-6 mb-6">
-      <h3 className="text-lg font-semibold text-meridian-teal mb-2">{title}</h3>
-      <p className="text-sm text-gray-600 mb-4">{description}</p>
-      
-      {items.length > 0 && (
-        <ul className="space-y-2">
+      <div
+        role="button"
+        tabIndex={hasItems ? 0 : -1}
+        aria-expanded={open}
+        onClick={toggle}
+        onKeyDown={(e) => {
+          if (hasItems && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault();
+            toggle();
+          }
+        }}
+        className={hasItems ? 'cursor-pointer' : ''}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold text-meridian-teal mb-2">{title}</h3>
+            <p className="text-sm text-gray-600">{description}</p>
+          </div>
+          {hasItems && (
+            <span className="text-meridian-gold text-2xl flex-shrink-0 leading-none">
+              {open ? '−' : '+'}
+            </span>
+          )}
+        </div>
+        {hasItems && !open && (
+          <p className="text-xs text-meridian-teal mt-3 font-semibold">
+            View full report ({items.length} steps) →
+          </p>
+        )}
+      </div>
+
+      {open && hasItems && (
+        <ul className="space-y-4 mt-4 border-t border-gray-100 pt-4">
           {items.map((item, idx) => (
             <li key={idx} className="flex gap-3 text-sm">
               <span className="text-meridian-gold flex-shrink-0">→</span>
-              <span className="text-gray-700">
-                {typeof item === 'string' ? item : item.title || item}
-              </span>
+              <div>
+                <p className="font-medium text-gray-800">
+                  {typeof item === 'string' ? item : item.title}
+                </p>
+                {typeof item !== 'string' && item.description && (
+                  <p className="text-gray-600 mt-1 leading-relaxed">{item.description}</p>
+                )}
+                {typeof item !== 'string' && item.successSignal && (
+                  <p className="text-xs text-meridian-teal mt-1">✓ {item.successSignal}</p>
+                )}
+              </div>
             </li>
           ))}
         </ul>
@@ -84,19 +138,14 @@ function ProUpgradeCard() {
         </div>
 
         {/* CTA */}
-        <div className="space-y-3">
-          <Button
-            variant="primary"
-            size="lg"
-            onClick={handleUpgrade}
-            className="w-full"
-          >
-            Upgrade to Pro
-          </Button>
-          <Button variant="ghost" size="lg" className="w-full">
-            Continue with Essentials
-          </Button>
-        </div>
+        <Button
+          variant="primary"
+          size="lg"
+          onClick={handleUpgrade}
+          className="w-full"
+        >
+          Upgrade to Pro
+        </Button>
       </div>
     </Card>
   );
@@ -106,6 +155,7 @@ export function FullPlanPage() {
   const { state, setStage } = useOnboarding();
   const plan = state.plan || {};
   const email = state.email;
+  const [checkedToday] = useState(isCheckedInToday);
 
   const thirtyDays = plan.thirtyDays || {};
   const sixtyDays = plan.sixtyDays || {};
@@ -129,7 +179,7 @@ export function FullPlanPage() {
       <div className="px-6 py-8 max-w-3xl mx-auto">
         {/* Confirmation banner */}
         <div className="bg-meridian-cream rounded-xl p-4 mb-8">
-          {state.emailed && email ? (
+          {email ? (
             <p className="text-sm text-gray-700">
               Check your inbox ✨ Your plan is on its way to <strong>{email}</strong>. (Peek in
               Promotions if you don't see it.)
@@ -184,16 +234,32 @@ export function FullPlanPage() {
 
         {/* CTA to daily check-in */}
         <div className="text-center py-8">
-          <p className="text-gray-600 mb-6">
-            Ready to get started? Check in each day for personalized guidance.
-          </p>
-          <Button
-            variant="primary"
-            size="lg"
-            onClick={() => setStage(ONBOARDING_STAGES.DAILY_CHECKIN)}
-          >
-            Start my first check-in →
-          </Button>
+          {checkedToday ? (
+            <>
+              <p className="text-meridian-teal font-semibold mb-2">
+                You're checked in for today 🎉
+              </p>
+              <p className="text-gray-600 mb-6">
+                Come back tomorrow for your next check-in — we'll be here.
+              </p>
+              <Button variant="primary" size="lg" disabled className="w-full sm:w-auto">
+                Checked in for today ✓
+              </Button>
+            </>
+          ) : (
+            <>
+              <p className="text-gray-600 mb-6">
+                Ready to get started? Check in each day for personalized guidance.
+              </p>
+              <Button
+                variant="primary"
+                size="lg"
+                onClick={() => setStage(ONBOARDING_STAGES.DAILY_CHECKIN)}
+              >
+                Start my first check-in →
+              </Button>
+            </>
+          )}
         </div>
       </div>
     </div>
