@@ -123,4 +123,5 @@ export const STORAGE_KEYS = {
   EMAIL: 'meridian_email',
   CURRENT_STAGE: 'meridian_stage',
   SESSION_ID: 'meridian_session_id',
+  CHECKIN: 'meridian_checkin',
 };
